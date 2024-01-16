@@ -3,7 +3,9 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 import pickle
 import os.path
-
+import re
+import base64
+from dateutil import parser
 
 class EmailReader:
     # def __init__(self, credentials_file='credentials.json', token_file='token.pickle', scopes=['https://www.googleapis.com/auth/gmail.readonly']):
@@ -42,16 +44,43 @@ class EmailReader:
             response = self.service.users().messages().list(userId='me', q=f'from:{sender}').execute()
             messages = response.get('messages', [])
 
-            emails = []
-            if not messages:
-                print("Nie znaleziono wiadomości od:", sender)
-            else:
-                print(f"Znaleziono {len(messages)} wiadomości od {sender}")
-                for message in messages:
-                    msg = self.service.users().messages().get(userId='me', id=message['id']).execute()
-                    emails.append(msg)
+            emails_info = []
+            for message in messages:
+                msg = self.service.users().messages().get(userId='me', id=message['id'], format='full').execute()
 
-            return emails
+                # Dekodowanie treści e-maila
+                message_parts = msg['payload'].get('parts', None)
+                message_raw = message_parts[0]['body']['data'] if message_parts else None
+                if message_raw:
+                    message_content = base64.urlsafe_b64decode(message_raw.encode('ASCII')).decode('utf-8')
+                else:
+                    continue  # Przechodzi do następnej wiadomości, jeśli nie można zdekodować treści
+
+                # Wyszukiwanie daty
+                date_header = msg['payload']['headers']
+                date_list = [d['value'] for d in date_header if d['name'] == 'Date']
+                date_str = date_list[0] if date_list else ''
+                date = parser.parse(date_str)
+
+                # Wyszukiwanie informacji o zamówieniu
+                subtotal_match = re.search(r'Subtotal:\s*€(\d+\.\d+)', message_content)
+                order_total_match = re.search(r'Order total:\s*€(\d+\.\d+)', message_content)
+                collection_name_match = re.search(r'(?<=\| ).*(?=Shop:)', message_content)
+
+                order_total = order_total_match.group(1) if order_total_match else 'Brak informacji'
+                subtotal = subtotal_match.group(1) if subtotal_match else order_total
+                collection_name = collection_name_match.group(
+                    0).strip() if collection_name_match else 'Brak informacji'
+
+                # Dodawanie przetworzonych informacji do listy
+                emails_info.append({
+                    'date': date.strftime('%Y/%m/%d %H:%M'),
+                    'hour': date.strftime('%H:%M'),
+                    'subtotal': subtotal,
+                    'collection_name': collection_name
+                })
+
+            return emails_info
 
         except Exception as error:
             print(f"Wystąpił błąd: {error}")
@@ -62,4 +91,4 @@ email_reader = EmailReader()
 emails_from_sender = email_reader.read_emails('forestica.creations@gmail.com')
 # Przykładowe wyświetlenie zawartości e-maili
 for email in emails_from_sender:
-    print(email['snippet'])  # 'snippet' zawiera krótki fragment treści e-maila
+    print(f"Data: {email['date']}, Hour: {email['hour']}, Subtotal: {email['subtotal']}, Collection Name: {email['collection_name']}")
