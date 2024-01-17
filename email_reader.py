@@ -6,6 +6,7 @@ import os.path
 import re
 import base64
 from dateutil import parser
+import random
 
 class EmailReader:
     # def __init__(self, credentials_file='credentials.json', token_file='token.pickle', scopes=['https://www.googleapis.com/auth/gmail.readonly']):
@@ -65,19 +66,21 @@ class EmailReader:
                 # Wyszukiwanie informacji o zamówieniu
                 subtotal_match = re.search(r'Subtotal:\s*€(\d+\.\d+)', message_content)
                 order_total_match = re.search(r'Order total:\s*€(\d+\.\d+)', message_content)
-                collection_name_match = re.search(r'(?<=\| ).*(?=Shop:)', message_content)
+                pattern = r'<https://www\.etsy\.com/transaction/.*?>(.*?)<https://www\.etsy\.com/transaction'
+                collection_name_match = re.search(pattern, message_content, re.DOTALL)
 
                 order_total = order_total_match.group(1) if order_total_match else 'Brak informacji'
                 subtotal = subtotal_match.group(1) if subtotal_match else order_total
-                collection_name = collection_name_match.group(
-                    0).strip() if collection_name_match else 'Brak informacji'
+                collection_name = collection_name_match.group(1) if collection_name_match else 'Brak informacji'
+                # collection_name = collection_name_match.group(
+                #     0).strip() if collection_name_match else 'Brak informacji'
 
                 # Dodawanie przetworzonych informacji do listy
                 emails_info.append({
                     'date': date.strftime('%Y/%m/%d %H:%M'),
                     'hour': date.strftime('%H:%M'),
                     'subtotal': subtotal,
-                    'collection_name': collection_name
+                    'collection_name': collection_name[2:]
                 })
 
             return emails_info
@@ -86,9 +89,37 @@ class EmailReader:
             print(f"Wystąpił błąd: {error}")
             return None
 
+    def read_whole_random_email(self, sender):
+        try:
+            # Wyszukuje wiadomości od określonego nadawcy
+            response = self.service.users().messages().list(userId='me', q=f'from:{sender}').execute()
+            messages = response.get('messages', [])
+
+            if not messages:
+                return "Nie znaleziono wiadomości od tego nadawcy."
+
+            # Wybierz losową wiadomość
+            random_message = random.choice(messages)
+
+            # Pobierz pełną treść e-maila
+            msg = self.service.users().messages().get(userId='me', id=random_message['id'], format='full').execute()
+
+            # Dekodowanie treści e-maila
+            message_parts = msg['payload'].get('parts', None)
+            message_raw = message_parts[0]['body']['data'] if message_parts else None
+            if message_raw:
+                message_content = base64.urlsafe_b64decode(message_raw.encode('ASCII')).decode('utf-8')
+                return message_content
+            else:
+                return "Nie można zdekodować treści wiadomości."
+
+        except Exception as error:
+            return f"Wystąpił błąd: {error}"
+
 
 email_reader = EmailReader()
 emails_from_sender = email_reader.read_emails('forestica.creations@gmail.com')
 # Przykładowe wyświetlenie zawartości e-maili
 for email in emails_from_sender:
     print(f"Data: {email['date']}, Hour: {email['hour']}, Subtotal: {email['subtotal']}, Collection Name: {email['collection_name']}")
+
