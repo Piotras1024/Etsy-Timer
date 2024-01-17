@@ -8,6 +8,7 @@ import base64
 from dateutil import parser
 import random
 
+
 class EmailReader:
     # def __init__(self, credentials_file='credentials.json', token_file='token.pickle', scopes=['https://www.googleapis.com/auth/gmail.readonly']):
     def __init__(self, credentials_file='credentials.json', token_file='token.pickle', scopes=None):
